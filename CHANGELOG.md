@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-03-25
+
+### Added
+- `PageNode` (pages tree) now includes `created_at` (page creation date) in addition to `updated_at`. Both fields are populated for root and all child nodes via v1 API `history.createdDate`.
+
+### Changed
+- Tree metadata fetching unified to v1 API (`/content/{id}?expand=version,history`) for both root and child nodes. Removes dependency on Confluence v2 API for tree operations.
+
 ## [0.1.2] - 2026-03-25
 
 ### Added

@@ -11,30 +11,33 @@ from ccli.exceptions import NotFoundError
 
 BASE_URL = "https://example.atlassian.net"
 
+# All metadata responses use v1 format (version.when, history.createdDate, _links.webui)
 _ROOT_META = {
     "id": "100",
     "title": "Root Page",
-    "version": {"createdAt": "2024-01-10T00:00:00.000Z"},
+    "version": {"when": "2024-01-10T00:00:00.000Z"},
+    "history": {"createdDate": "2024-01-01T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
-
-# v1 child/page format: includes version.when and _links.webui
 _CHILD_A = {
     "id": "101",
     "title": "Child A",
     "version": {"when": "2024-01-15T10:00:00.000Z"},
+    "history": {"createdDate": "2024-01-05T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/101"},
 }
 _CHILD_B = {
     "id": "102",
     "title": "Child B",
     "version": {"when": "2024-01-20T10:00:00.000Z"},
+    "history": {"createdDate": "2024-01-06T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/102"},
 }
 _GRANDCHILD = {
     "id": "201",
     "title": "Grandchild",
     "version": {"when": "2024-01-25T10:00:00.000Z"},
+    "history": {"createdDate": "2024-01-07T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/201"},
 }
 
@@ -113,14 +116,16 @@ class TestGetTree:
         with pytest.raises(NotFoundError):
             client.get_tree("999")
 
-    def test_updated_at_populated(self, httpx_mock: HTTPXMock) -> None:
+    def test_dates_populated(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
         httpx_mock.add_response(json=_children(_CHILD_A))
         httpx_mock.add_response(json=_children())
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
         assert tree.updated_at == "2024-01-10T00:00:00.000Z"
+        assert tree.created_at == "2024-01-01T00:00:00.000Z"
         assert tree.children[0].updated_at == "2024-01-15T10:00:00.000Z"
+        assert tree.children[0].created_at == "2024-01-05T00:00:00.000Z"
 
     def test_pagination_in_children(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)

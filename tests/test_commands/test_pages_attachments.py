@@ -54,7 +54,8 @@ _ATTACHMENTS_RESPONSE = {
 _PAGE_META = {
     "id": "100",
     "title": "Root",
-    "version": {"createdAt": "2024-01-10T00:00:00.000Z"},
+    "version": {"when": "2024-01-10T00:00:00.000Z"},
+    "history": {"createdDate": "2024-01-01T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
 

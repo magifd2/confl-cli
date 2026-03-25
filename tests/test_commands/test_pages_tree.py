@@ -19,20 +19,22 @@ ENV = {
 _ROOT_META = {
     "id": "100",
     "title": "Root Page",
-    "version": {"createdAt": "2024-01-10T00:00:00.000Z"},
+    "version": {"when": "2024-01-10T00:00:00.000Z"},
+    "history": {"createdDate": "2024-01-01T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
-# v1 child/page format
 _CHILD_A = {
     "id": "101",
     "title": "Child A",
     "version": {"when": "2024-01-15T10:00:00.000Z"},
+    "history": {"createdDate": "2024-01-05T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/101"},
 }
 _CHILD_B = {
     "id": "102",
     "title": "Child B",
     "version": {"when": "2024-01-20T10:00:00.000Z"},
+    "history": {"createdDate": "2024-01-06T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/102"},
 }
 

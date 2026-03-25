@@ -5,7 +5,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ..auth import API_V1, API_V2
+from ..auth import API_V1
 from .attachments import Attachment
 from .base import ConfluenceClient
 
@@ -64,7 +64,8 @@ class PageNode(BaseModel):
     id: str
     title: str
     url: str = ""
-    updated_at: str = ""  # populated from version.createdAt in v2 API
+    created_at: str = ""
+    updated_at: str = ""
     attachments: list[Attachment] = []  # populated when --attachments is used
     children: list[PageNode] = []
 
@@ -73,36 +74,18 @@ PageNode.model_rebuild()
 
 
 # --------------------------------------------------------------------------- #
-# Internal Pydantic models for v2 API responses (tree / metadata)              #
+# Internal Pydantic models for v1 API (tree metadata)                          #
 # --------------------------------------------------------------------------- #
 
 
-class _V2Version(BaseModel):
-    created_at: str = Field("", alias="createdAt")
-
-    model_config = {"populate_by_name": True}
-
-
-class _V2PageMeta(BaseModel):
-    id: str
-    title: str
-    version: _V2Version = Field(default_factory=_V2Version)
-    links: dict[str, Any] = Field(default_factory=dict, alias="_links")
-
-    model_config = {"populate_by_name": True}
-
-
-class _V2ListResponse(BaseModel):
-    results: list[_V2PageMeta]
-    links: dict[str, Any] = Field(default_factory=dict, alias="_links")
-
-    model_config = {"populate_by_name": True}
-
-
-# v1 child/page response models (used to get version.when and _links.webui for children)
-
 class _V1ChildVersion(BaseModel):
     when: str = ""
+
+
+class _V1ChildHistory(BaseModel):
+    created_date: str = Field("", alias="createdDate")
+
+    model_config = {"populate_by_name": True}
 
 
 class _V1ChildLinks(BaseModel):
@@ -111,21 +94,22 @@ class _V1ChildLinks(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class _V1ChildPage(BaseModel):
+class _V1PageMeta(BaseModel):
+    """v1 page response with version and history (no body content)."""
+
     id: str
     title: str
     version: _V1ChildVersion = Field(default_factory=_V1ChildVersion)
+    history: _V1ChildHistory = Field(default_factory=_V1ChildHistory)
     links: _V1ChildLinks = Field(default_factory=_V1ChildLinks, alias="_links")
 
     model_config = {"populate_by_name": True}
 
 
 class _V1ChildrenResponse(BaseModel):
-    results: list[_V1ChildPage]
+    results: list[_V1PageMeta]
     size: int = 0
     limit: int = 25
-
-    model_config = {"populate_by_name": True}
 
 
 # --------------------------------------------------------------------------- #
@@ -284,39 +268,41 @@ class PagesClient:
         )
 
     # ---------------------------------------------------------------------- #
-    # Tree operations (use v2 API — metadata only, no body content)           #
+    # Tree operations (v1 API — metadata only, no body content)              #
     # ---------------------------------------------------------------------- #
 
     def get_tree(self, page_id: str, depth: int | None = None) -> PageNode:
         """Return a tree of PageNode starting from *page_id*.
 
-        Only id, title, and url are fetched per node; body content is omitted
-        for efficiency.  Use *depth* to limit recursion (None = unlimited).
+        Only id, title, url, and dates are fetched per node; body content is
+        omitted for efficiency.  Use *depth* to limit recursion (None = unlimited).
         """
         root = self._get_page_meta(page_id)
         self._fill_children(root, depth=depth, current_depth=0)
         return root
 
     def _get_page_meta(self, page_id: str) -> PageNode:
-        data = self._client.get(f"{API_V2}/pages/{page_id}")
-        meta = _V2PageMeta(**data)
-        webui = meta.links.get("webui", "")
+        data = self._client.get(
+            f"{_CONTENT_PATH}/{page_id}", params={"expand": "version,history"}
+        )
+        meta = _V1PageMeta(**data)
         return PageNode(
             id=meta.id,
             title=meta.title,
-            url=f"{self._base_url}{webui}" if webui else "",
-            updated_at=meta.version.created_at,
+            url=f"{self._base_url}{meta.links.webui}" if meta.links.webui else "",
+            created_at=meta.history.created_date,
+            updated_at=meta.version.when,
         )
 
     def _get_children_meta(self, page_id: str) -> list[PageNode]:
-        """Fetch direct children using v1 API (supports version.when and _links.webui)."""
+        """Fetch direct children using v1 API (version.when, history.createdDate, webui URL)."""
         children: list[PageNode] = []
         start = 0
         limit = 250
 
         while True:
             params: dict[str, Any] = {
-                "expand": "version",
+                "expand": "version,history",
                 "limit": limit,
                 "start": start,
             }
@@ -326,12 +312,12 @@ class PagesClient:
             page = _V1ChildrenResponse(**data)
 
             for child in page.results:
-                webui = child.links.webui
                 children.append(
                     PageNode(
                         id=child.id,
                         title=child.title,
-                        url=f"{self._base_url}{webui}" if webui else "",
+                        url=f"{self._base_url}{child.links.webui}" if child.links.webui else "",
+                        created_at=child.history.created_date,
                         updated_at=child.version.when,
                     )
                 )
