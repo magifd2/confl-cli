@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from ..auth import API_V1
+from ..auth import API_V1, API_V2
 from .base import ConfluenceClient
 
 _SEARCH_PATH = f"{API_V1}/search"
@@ -47,6 +47,38 @@ class PageSummary(BaseModel):
     url: str
     last_modified: str
     excerpt: str = ""
+
+
+class PageNode(BaseModel):
+    """Lightweight page node used for tree traversal (metadata only, no body content)."""
+
+    id: str
+    title: str
+    url: str = ""
+    children: list[PageNode] = []
+
+
+PageNode.model_rebuild()
+
+
+# --------------------------------------------------------------------------- #
+# Internal Pydantic models for v2 API responses (tree / metadata)              #
+# --------------------------------------------------------------------------- #
+
+
+class _V2PageMeta(BaseModel):
+    id: str
+    title: str
+    links: dict[str, Any] = Field(default_factory=dict, alias="_links")
+
+    model_config = {"populate_by_name": True}
+
+
+class _V2ListResponse(BaseModel):
+    results: list[_V2PageMeta]
+    links: dict[str, Any] = Field(default_factory=dict, alias="_links")
+
+    model_config = {"populate_by_name": True}
 
 
 # --------------------------------------------------------------------------- #
@@ -203,3 +235,70 @@ class PagesClient:
             url=f"{self._base_url}{webui}" if webui else "",
             parent_id=parent_id,
         )
+
+    # ---------------------------------------------------------------------- #
+    # Tree operations (use v2 API — metadata only, no body content)           #
+    # ---------------------------------------------------------------------- #
+
+    def get_tree(self, page_id: str, depth: Optional[int] = None) -> PageNode:
+        """Return a tree of PageNode starting from *page_id*.
+
+        Only id, title, and url are fetched per node; body content is omitted
+        for efficiency.  Use *depth* to limit recursion (None = unlimited).
+        """
+        root = self._get_page_meta(page_id)
+        self._fill_children(root, depth=depth, current_depth=0)
+        return root
+
+    def _get_page_meta(self, page_id: str) -> PageNode:
+        data = self._client.get(f"{API_V2}/pages/{page_id}")
+        meta = _V2PageMeta(**data)
+        webui = meta.links.get("webui", "")
+        return PageNode(
+            id=meta.id,
+            title=meta.title,
+            url=f"{self._base_url}{webui}" if webui else "",
+        )
+
+    def _get_children_meta(self, page_id: str) -> list[PageNode]:
+        children: list[PageNode] = []
+        cursor: Optional[str] = None
+
+        while True:
+            params: dict[str, Any] = {"limit": 250}
+            if cursor:
+                params["cursor"] = cursor
+
+            data = self._client.get(f"{API_V2}/pages/{page_id}/children", params=params)
+            page = _V2ListResponse(**data)
+
+            for meta in page.results:
+                webui = meta.links.get("webui", "")
+                children.append(
+                    PageNode(
+                        id=meta.id,
+                        title=meta.title,
+                        url=f"{self._base_url}{webui}" if webui else "",
+                    )
+                )
+
+            next_url = page.links.get("next")
+            if not next_url:
+                break
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(next_url).query)
+            cursors = qs.get("cursor", [])
+            cursor = cursors[0] if cursors else None
+            if not cursor:
+                break
+
+        return children
+
+    def _fill_children(
+        self, node: PageNode, depth: Optional[int], current_depth: int
+    ) -> None:
+        if depth is not None and current_depth >= depth:
+            return
+        node.children = self._get_children_meta(node.id)
+        for child in node.children:
+            self._fill_children(child, depth=depth, current_depth=current_depth + 1)

@@ -1,7 +1,8 @@
 from rich.console import Console
 from rich.table import Table
+from rich.tree import Tree
 
-from ..client.pages import Page, PageSummary
+from ..client.pages import Page, PageNode, PageSummary
 from ..client.spaces import Space
 from ..converters.html_to_text import html_to_markdown
 
@@ -45,6 +46,29 @@ def print_page_summaries(summaries: list[PageSummary], *, color: bool = True) ->
         table.add_row(s.id, s.space_key, s.title, last_mod)
 
     console.print(table)
+
+
+def print_page_tree(node: PageNode, *, color: bool = True) -> None:
+    console = _console(color)
+    label = (
+        f"[bold]{node.title}[/bold] [dim]({node.id})[/dim]"
+        if color
+        else f"{node.title} ({node.id})"
+    )
+    tree = Tree(label)
+    _add_to_tree(tree, node.children, color=color)
+    console.print(tree)
+
+
+def _add_to_tree(parent: Tree, children: list[PageNode], *, color: bool) -> None:
+    for child in children:
+        label = (
+            f"[bold]{child.title}[/bold] [dim]({child.id})[/dim]"
+            if color
+            else f"{child.title} ({child.id})"
+        )
+        branch = parent.add(label)
+        _add_to_tree(branch, child.children, color=color)
 
 
 def print_page(page: Page, *, color: bool = True) -> None:

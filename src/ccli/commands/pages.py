@@ -11,7 +11,7 @@ from ..exceptions import CCLIError, ConfigError
 from ..formatters.base import use_color
 from ..formatters.html_fmt import print_html
 from ..formatters.json_fmt import print_json
-from ..formatters.text import print_page, print_page_summaries
+from ..formatters.text import print_page, print_page_summaries, print_page_tree
 
 pages_app = typer.Typer(help="Page operations.")
 
@@ -21,6 +21,11 @@ class OutputFormat(str, Enum):
     json = "json"
     html = "html"
     storage = "storage"  # Confluence Storage Format (XHTML-like source)
+
+
+class TreeOutputFormat(str, Enum):
+    text = "text"
+    json = "json"
 
 
 def _make_pages_client() -> PagesClient:
@@ -74,3 +79,23 @@ def pages_get(
         print(page.body_storage)
     else:
         print_page(page, color=use_color())
+
+
+@pages_app.command("tree")
+def pages_tree(
+    page_id: str = typer.Argument(help="Root page ID."),
+    depth: Optional[int] = typer.Option(None, "--depth", "-d", help="Max recursion depth (default: unlimited)."),
+    format: TreeOutputFormat = typer.Option(TreeOutputFormat.text, "--format", "-f"),
+) -> None:
+    """Get a page and all its descendants as a tree."""
+    client = _make_pages_client()
+    try:
+        tree = client.get_tree(page_id, depth=depth)
+    except CCLIError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=exc.exit_code)
+
+    if format == TreeOutputFormat.json:
+        print_json(tree.model_dump())
+    else:
+        print_page_tree(tree, color=use_color())
