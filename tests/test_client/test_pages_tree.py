@@ -164,3 +164,47 @@ class TestGetTree:
         tree = client.get_tree("101")
         assert len(tree.children) == 1
         assert tree.children[0].id == "201"
+
+    def test_space_home_page_virtual_root_in_ancestors(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        """Regression: Confluence Cloud sometimes returns a virtual space-root node
+        in the ancestors list instead of (or in addition to) the queried page.
+        Children whose ancestors don't include the queried page ID must still be
+        attached to the root rather than dropped as orphans.
+        """
+        # Home page has no ancestors of its own (it IS the space root)
+        home_meta = {
+            "id": "100",
+            "title": "Space Home",
+            "version": {"when": "2024-01-10T00:00:00.000Z"},
+            "history": {"createdDate": "2024-01-01T00:00:00.000Z"},
+            "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
+        }
+        # Direct child: ancestors list contains a virtual-space-root ID, NOT "100"
+        child_virtual = {
+            "id": "200",
+            "title": "Page A",
+            "version": {"when": "2024-01-15T00:00:00.000Z"},
+            "history": {"createdDate": "2024-01-05T00:00:00.000Z"},
+            "ancestors": [{"id": "virtual-space-root"}],  # home page 100 absent
+            "_links": {"webui": "/wiki/spaces/DEV/pages/200"},
+        }
+        # Grandchild: ancestors are [virtual-space-root, 200]
+        grandchild_virtual = {
+            "id": "300",
+            "title": "Page B",
+            "version": {"when": "2024-01-20T00:00:00.000Z"},
+            "history": {"createdDate": "2024-01-06T00:00:00.000Z"},
+            "ancestors": [{"id": "virtual-space-root"}, {"id": "200"}],
+            "_links": {"webui": "/wiki/spaces/DEV/pages/300"},
+        }
+        httpx_mock.add_response(json=home_meta)
+        httpx_mock.add_response(json=_descendants(child_virtual, grandchild_virtual))
+        client = _make_client(httpx_mock)
+        tree = client.get_tree("100")
+        # Both pages must appear — not orphaned
+        assert len(tree.children) == 1
+        assert tree.children[0].id == "200"
+        assert len(tree.children[0].children) == 1
+        assert tree.children[0].children[0].id == "300"

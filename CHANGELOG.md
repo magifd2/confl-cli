@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `pages tree`: pages whose `ancestors` list contains a virtual space-root node (instead of the queried page ID) were silently orphaned and missing from the tree output. This caused the space home page to show only 1 node. Now falls back to the nearest known ancestor in the chain, then to root.
+
 ### Added
 - `pages get --base-path <dir>`: rewrite Confluence page links to `<base-path>/<id>/page.<ext>` and attachment links to their downloaded location in text/HTML output. No effect for JSON or storage format.
 - `pages tree --page-format` now automatically rewrites cross-page links and attachment links to relative local paths when `--output-dir` is set.

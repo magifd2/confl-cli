@@ -319,10 +319,16 @@ class PagesClient:
                 updated_at=desc.version.when,
             )
             nodes[desc.id] = node
-            parent_id = desc.ancestors[-1].id if desc.ancestors else page_id
-            parent = nodes.get(parent_id)
-            if parent is not None:
-                parent.children.append(node)
+            # Walk up the ancestor chain (closest first) to find a parent already
+            # in our nodes dict.  This handles Confluence instances where the
+            # ancestors list includes a virtual space-root node that is not a real
+            # page (so its ID never appears in nodes).  Falls back to root.
+            parent: PageNode = root
+            for anc in reversed(desc.ancestors):
+                if anc.id in nodes:
+                    parent = nodes[anc.id]
+                    break
+            parent.children.append(node)
 
         return root
 
