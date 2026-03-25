@@ -64,6 +64,7 @@ class PageNode(BaseModel):
     id: str
     title: str
     url: str = ""
+    updated_at: str = ""  # populated from version.createdAt in v2 API
     attachments: list[Attachment] = []  # populated when --attachments is used
     children: list[PageNode] = []
 
@@ -76,9 +77,16 @@ PageNode.model_rebuild()
 # --------------------------------------------------------------------------- #
 
 
+class _V2Version(BaseModel):
+    created_at: str = Field("", alias="createdAt")
+
+    model_config = {"populate_by_name": True}
+
+
 class _V2PageMeta(BaseModel):
     id: str
     title: str
+    version: _V2Version = Field(default_factory=_V2Version)
     links: dict[str, Any] = Field(default_factory=dict, alias="_links")
 
     model_config = {"populate_by_name": True}
@@ -87,6 +95,35 @@ class _V2PageMeta(BaseModel):
 class _V2ListResponse(BaseModel):
     results: list[_V2PageMeta]
     links: dict[str, Any] = Field(default_factory=dict, alias="_links")
+
+    model_config = {"populate_by_name": True}
+
+
+# v1 child/page response models (used to get version.when and _links.webui for children)
+
+class _V1ChildVersion(BaseModel):
+    when: str = ""
+
+
+class _V1ChildLinks(BaseModel):
+    webui: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
+class _V1ChildPage(BaseModel):
+    id: str
+    title: str
+    version: _V1ChildVersion = Field(default_factory=_V1ChildVersion)
+    links: _V1ChildLinks = Field(default_factory=_V1ChildLinks, alias="_links")
+
+    model_config = {"populate_by_name": True}
+
+
+class _V1ChildrenResponse(BaseModel):
+    results: list[_V1ChildPage]
+    size: int = 0
+    limit: int = 25
 
     model_config = {"populate_by_name": True}
 
@@ -268,39 +305,40 @@ class PagesClient:
             id=meta.id,
             title=meta.title,
             url=f"{self._base_url}{webui}" if webui else "",
+            updated_at=meta.version.created_at,
         )
 
     def _get_children_meta(self, page_id: str) -> list[PageNode]:
+        """Fetch direct children using v1 API (supports version.when and _links.webui)."""
         children: list[PageNode] = []
-        cursor: str | None = None
+        start = 0
+        limit = 250
 
         while True:
-            params: dict[str, Any] = {"limit": 250}
-            if cursor:
-                params["cursor"] = cursor
+            params: dict[str, Any] = {
+                "expand": "version",
+                "limit": limit,
+                "start": start,
+            }
+            data = self._client.get(
+                f"{_CONTENT_PATH}/{page_id}/child/page", params=params
+            )
+            page = _V1ChildrenResponse(**data)
 
-            data = self._client.get(f"{API_V2}/pages/{page_id}/children", params=params)
-            page = _V2ListResponse(**data)
-
-            for meta in page.results:
-                webui = meta.links.get("webui", "")
+            for child in page.results:
+                webui = child.links.webui
                 children.append(
                     PageNode(
-                        id=meta.id,
-                        title=meta.title,
+                        id=child.id,
+                        title=child.title,
                         url=f"{self._base_url}{webui}" if webui else "",
+                        updated_at=child.version.when,
                     )
                 )
 
-            next_url = page.links.get("next")
-            if not next_url:
+            if page.size < limit:
                 break
-            from urllib.parse import parse_qs, urlparse
-            qs = parse_qs(urlparse(next_url).query)
-            cursors = qs.get("cursor", [])
-            cursor = cursors[0] if cursors else None
-            if not cursor:
-                break
+            start += page.size
 
         return children
 

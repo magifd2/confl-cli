@@ -69,7 +69,24 @@ confl-cli pages tree 123456789 --format json | jq '.'
 
 # Get a page tree to depth 2 and download all attachments
 confl-cli pages tree 123456789 --depth 2 --attachments --output-dir ./downloads
+
+# Get a page tree and save each page body as Markdown (requires --output-dir)
+confl-cli pages tree 123456789 --page-format text --output-dir ./downloads
+
+# Get a page tree and save each page body as JSON, plus download attachments
+confl-cli pages tree 123456789 --page-format json --attachments --output-dir ./downloads
 ```
+
+### `--page-format` for `pages tree`
+
+| Flag | Saved file |
+|------|------------|
+| `--page-format text` | `<page-id>/page.md` (Markdown via markdownify) |
+| `--page-format html` | `<page-id>/page.html` |
+| `--page-format json` | `<page-id>/page.json` |
+| `--page-format storage` | `<page-id>/page.xml` (Confluence Storage Format) |
+
+Requires `--output-dir`. Combine with `--attachments` to download both page bodies and attachments.
 
 ### Output formats for `pages get`
 

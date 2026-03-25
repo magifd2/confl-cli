@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "confl-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "Atlassian Confluence CLI tool"
 readme = "README.md"
 license = { text = "MIT" }

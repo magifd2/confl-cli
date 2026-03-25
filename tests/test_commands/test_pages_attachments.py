@@ -54,8 +54,12 @@ _ATTACHMENTS_RESPONSE = {
 _PAGE_META = {
     "id": "100",
     "title": "Root",
+    "version": {"createdAt": "2024-01-10T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
+
+def _v1_children(*pages: dict) -> dict:  # type: ignore[type-arg]
+    return {"results": list(pages), "size": len(pages), "limit": 250}
 
 
 @pytest.fixture(autouse=True)
@@ -117,7 +121,7 @@ class TestPagesGetAttachments:
 class TestPagesTreeAttachments:
     def _setup_tree(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_PAGE_META)
-        httpx_mock.add_response(json={"results": [], "_links": {}})  # children
+        httpx_mock.add_response(json=_v1_children())  # children
 
     def test_attachments_in_tree_json(self, httpx_mock: HTTPXMock) -> None:
         self._setup_tree(httpx_mock)
@@ -142,3 +146,84 @@ class TestPagesTreeAttachments:
         )
         assert result.exit_code == 0
         assert (tmp_path / "100" / "report.pdf").exists()
+
+
+class TestPagesTreePageFormat:
+    def _setup_tree(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(json=_PAGE_META)
+        httpx_mock.add_response(json=_v1_children())  # children
+
+    def test_page_format_requires_output_dir(self, httpx_mock: HTTPXMock) -> None:
+        result = runner.invoke(app, ["pages", "tree", "100", "--page-format", "text"])
+        assert result.exit_code == 6
+        assert "--output-dir" in result.output
+
+    def test_page_format_text_saves_md(self, httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+        self._setup_tree(httpx_mock)
+        httpx_mock.add_response(json={"results": [], "_links": {}})  # attachments
+        httpx_mock.add_response(json=_CONTENT_RESPONSE)  # pages.get for content
+        result = runner.invoke(
+            app,
+            ["pages", "tree", "100", "--output-dir", str(tmp_path), "--page-format", "text"],
+        )
+        assert result.exit_code == 0
+        saved = tmp_path / "100" / "page.md"
+        assert saved.exists()
+
+    def test_page_format_html_saves_html(self, httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+        self._setup_tree(httpx_mock)
+        httpx_mock.add_response(json={"results": [], "_links": {}})  # attachments
+        httpx_mock.add_response(json=_CONTENT_RESPONSE)
+        result = runner.invoke(
+            app,
+            ["pages", "tree", "100", "--output-dir", str(tmp_path), "--page-format", "html"],
+        )
+        assert result.exit_code == 0
+        assert (tmp_path / "100" / "page.html").exists()
+
+    def test_page_format_json_saves_json(self, httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+        self._setup_tree(httpx_mock)
+        httpx_mock.add_response(json={"results": [], "_links": {}})  # attachments
+        httpx_mock.add_response(json=_CONTENT_RESPONSE)
+        result = runner.invoke(
+            app,
+            ["pages", "tree", "100", "--output-dir", str(tmp_path), "--page-format", "json"],
+        )
+        assert result.exit_code == 0
+        saved = tmp_path / "100" / "page.json"
+        assert saved.exists()
+        data = json.loads(saved.read_text())
+        assert "id" in data
+        assert "title" in data
+
+    def test_page_format_storage_saves_xml(self, httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+        self._setup_tree(httpx_mock)
+        httpx_mock.add_response(json={"results": [], "_links": {}})  # attachments
+        httpx_mock.add_response(json=_CONTENT_RESPONSE)
+        result = runner.invoke(
+            app,
+            [
+                "pages", "tree", "100",
+                "--output-dir", str(tmp_path),
+                "--page-format", "storage",
+            ],
+        )
+        assert result.exit_code == 0
+        assert (tmp_path / "100" / "page.xml").exists()
+
+    def test_page_format_with_attachments(self, httpx_mock: HTTPXMock, tmp_path: Path) -> None:
+        self._setup_tree(httpx_mock)
+        httpx_mock.add_response(json=_ATTACHMENTS_RESPONSE)
+        httpx_mock.add_response(content=b"pdf")
+        httpx_mock.add_response(json=_CONTENT_RESPONSE)
+        result = runner.invoke(
+            app,
+            [
+                "pages", "tree", "100",
+                "--attachments", "--output-dir", str(tmp_path),
+                "--page-format", "text",
+            ],
+        )
+        assert result.exit_code == 0
+        assert (tmp_path / "100" / "report.pdf").exists()
+        assert (tmp_path / "100" / "page.md").exists()

@@ -19,18 +19,26 @@ ENV = {
 _ROOT_META = {
     "id": "100",
     "title": "Root Page",
+    "version": {"createdAt": "2024-01-10T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
+# v1 child/page format
 _CHILD_A = {
     "id": "101",
     "title": "Child A",
+    "version": {"when": "2024-01-15T10:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/101"},
 }
 _CHILD_B = {
     "id": "102",
     "title": "Child B",
+    "version": {"when": "2024-01-20T10:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/102"},
 }
+
+
+def _v1_children(*pages: dict) -> dict:  # type: ignore[type-arg]
+    return {"results": list(pages), "size": len(pages), "limit": 250}
 
 
 @pytest.fixture(autouse=True)
@@ -42,9 +50,9 @@ def set_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _setup_flat_tree(httpx_mock: HTTPXMock) -> None:
     """Root with two children, no grandchildren."""
     httpx_mock.add_response(json=_ROOT_META)
-    httpx_mock.add_response(json={"results": [_CHILD_A, _CHILD_B], "_links": {}})
-    httpx_mock.add_response(json={"results": [], "_links": {}})
-    httpx_mock.add_response(json={"results": [], "_links": {}})
+    httpx_mock.add_response(json=_v1_children(_CHILD_A, _CHILD_B))
+    httpx_mock.add_response(json=_v1_children())
+    httpx_mock.add_response(json=_v1_children())
 
 
 class TestPagesTree:
@@ -74,7 +82,7 @@ class TestPagesTree:
 
     def test_depth_option(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        httpx_mock.add_response(json={"results": [_CHILD_A], "_links": {}})
+        httpx_mock.add_response(json=_v1_children(_CHILD_A))
         result = runner.invoke(app, ["pages", "tree", "100", "--depth", "1"])
         assert result.exit_code == 0
         assert "Child A" in result.output

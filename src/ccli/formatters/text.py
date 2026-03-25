@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from rich.console import Console
 from rich.table import Table
 from rich.tree import Tree
@@ -9,6 +11,20 @@ from ..converters.html_to_text import html_to_markdown
 
 def _console(color: bool) -> Console:
     return Console(highlight=False, no_color=not color)
+
+
+def _local_dt(ts: str) -> str:
+    """Convert a UTC ISO 8601 timestamp to local datetime string (YYYY-MM-DD HH:MM).
+
+    Falls back to the first 10 characters (date only) if parsing fails.
+    """
+    if not ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M")
+    except (ValueError, OSError):
+        return ts[:10]
 
 
 def print_spaces(spaces: list[Space], *, color: bool = True) -> None:
@@ -42,32 +58,28 @@ def print_page_summaries(summaries: list[PageSummary], *, color: bool = True) ->
     table.add_column("LAST MODIFIED")
 
     for s in summaries:
-        last_mod = s.last_modified[:10] if s.last_modified else ""
-        table.add_row(s.id, s.space_key, s.title, last_mod)
+        table.add_row(s.id, s.space_key, s.title, _local_dt(s.last_modified))
 
     console.print(table)
 
 
+def _node_label(node: PageNode, *, color: bool) -> str:
+    date = f"  {_local_dt(node.updated_at)}" if node.updated_at else ""
+    if color:
+        return f"[bold]{node.title}[/bold] [dim]({node.id}){date}[/dim]"
+    return f"{node.title} ({node.id}){date}"
+
+
 def print_page_tree(node: PageNode, *, color: bool = True) -> None:
     console = _console(color)
-    label = (
-        f"[bold]{node.title}[/bold] [dim]({node.id})[/dim]"
-        if color
-        else f"{node.title} ({node.id})"
-    )
-    tree = Tree(label)
+    tree = Tree(_node_label(node, color=color))
     _add_to_tree(tree, node.children, color=color)
     console.print(tree)
 
 
 def _add_to_tree(parent: Tree, children: list[PageNode], *, color: bool) -> None:
     for child in children:
-        label = (
-            f"[bold]{child.title}[/bold] [dim]({child.id})[/dim]"
-            if color
-            else f"{child.title} ({child.id})"
-        )
-        branch = parent.add(label)
+        branch = parent.add(_node_label(child, color=color))
         _add_to_tree(branch, child.children, color=color)
 
 
@@ -80,7 +92,7 @@ def print_page(page: Page, *, color: bool = True) -> None:
     console.print(f"# {page.title}", style=title_style)
     console.print(
         f"Space: {page.space_key}  |  Version: {page.version}  |  "
-        f"Updated: {page.updated_at[:10]}  |  Author: {page.author.display_name}",
+        f"Updated: {_local_dt(page.updated_at)}  |  Author: {page.author.display_name}",
         style=meta_style,
     )
     if page.url:

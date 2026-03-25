@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-03-25
+
+### Added
+- `pages tree --page-format <text|html|json|storage>`: save each page body to `<output-dir>/<page-id>/page.md|.html|.json|.xml`. Requires `--output-dir`. Combine with `--attachments` to download both bodies and attachments in one pass.
+- `pages tree`: last modified date shown next to each node title in text output; `updated_at` field added to JSON output.
+
+### Fixed
+- `pages tree`: child pages now fetch version info and web URL via v1 API (`/content/{id}/child/page?expand=version`). Previously the v2 `/children` endpoint returned neither field, leaving child URLs and dates empty.
+- All text displays (`pages tree`, `pages get`, `pages search`) now convert UTC timestamps to local time (`YYYY-MM-DD HH:MM`). JSON output retains the original UTC ISO 8601 value.
+
 ## [0.1.0] - 2026-03-25
 
 ### Added

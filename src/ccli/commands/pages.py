@@ -1,3 +1,4 @@
+import json as _json
 from enum import StrEnum
 from pathlib import Path
 
@@ -7,8 +8,9 @@ import typer
 from ..auth import build_client
 from ..client.attachments import AttachmentsClient
 from ..client.base import ConfluenceClient
-from ..client.pages import PageNode, PagesClient
+from ..client.pages import Page, PageNode, PagesClient
 from ..config import Config, load_config
+from ..converters.html_to_text import html_to_markdown
 from ..downloader import download_file, safe_attachment_dest
 from ..exceptions import CCLIError, ConfigError
 from ..formatters.base import use_color
@@ -112,6 +114,29 @@ def pages_get(
         print_page(page, color=use_color())
 
 
+_PAGE_FORMAT_EXT: dict[OutputFormat, str] = {
+    OutputFormat.text: "page.md",
+    OutputFormat.html: "page.html",
+    OutputFormat.json: "page.json",
+    OutputFormat.storage: "page.xml",
+}
+
+
+def _save_page_content(page: Page, dest_dir: Path, page_format: OutputFormat) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / _PAGE_FORMAT_EXT[page_format]
+    if page_format == OutputFormat.text:
+        dest.write_text(html_to_markdown(page.body_html), encoding="utf-8")
+    elif page_format == OutputFormat.html:
+        dest.write_text(page.body_html, encoding="utf-8")
+    elif page_format == OutputFormat.json:
+        dest.write_text(
+            _json.dumps(page.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    else:  # storage
+        dest.write_text(page.body_storage, encoding="utf-8")
+
+
 @pages_app.command("tree")
 def pages_tree(
     page_id: str = typer.Argument(help="Root page ID."),
@@ -123,18 +148,28 @@ def pages_tree(
     output_dir: Path | None = typer.Option(
         None, "--output-dir", help="Download attachments to this directory."
     ),
+    page_format: OutputFormat | None = typer.Option(
+        None, "--page-format", help="Save each page body in this format to --output-dir."
+    ),
 ) -> None:
     """Get a page and all its descendants as a tree."""
+    if page_format is not None and output_dir is None:
+        typer.echo("Error: --page-format requires --output-dir.", err=True)
+        raise typer.Exit(code=6)
+
     config, http_client, cc = _setup()
+    pc = PagesClient(cc, config.confluence.url)
     try:
-        tree = PagesClient(cc, config.confluence.url).get_tree(page_id, depth=depth)
+        tree = pc.get_tree(page_id, depth=depth)
     except CCLIError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=exc.exit_code) from None
 
     if with_attachments or output_dir:
         _populate_tree_attachments(
-            tree, AttachmentsClient(cc), http_client, output_dir
+            tree, AttachmentsClient(cc), http_client, output_dir,
+            pages_client=pc if page_format is not None else None,
+            page_format=page_format,
         )
 
     if format == TreeOutputFormat.json:
@@ -148,8 +183,10 @@ def _populate_tree_attachments(
     attach_client: AttachmentsClient,
     http_client: httpx.Client,
     output_dir: Path | None,
+    pages_client: PagesClient | None = None,
+    page_format: OutputFormat | None = None,
 ) -> None:
-    """Recursively fetch (and optionally download) attachments for every node."""
+    """Recursively fetch (and optionally download) attachments and page content for every node."""
     try:
         attachments = attach_client.list(node.id)
     except CCLIError as exc:
@@ -165,7 +202,18 @@ def _populate_tree_attachments(
             except Exception as exc:  # noqa: BLE001
                 typer.echo(f"Warning: could not download {att.filename}: {exc}", err=True)
 
+        if pages_client is not None and page_format is not None:
+            try:
+                page = pages_client.get(node.id)
+                _save_page_content(page, output_dir / node.id, page_format)
+            except CCLIError as exc:
+                typer.echo(f"Warning: page content for {node.id} unavailable: {exc}", err=True)
+            except Exception as exc:  # noqa: BLE001
+                typer.echo(f"Warning: could not save page {node.id}: {exc}", err=True)
+
     node.attachments = attachments
 
     for child in node.children:
-        _populate_tree_attachments(child, attach_client, http_client, output_dir)
+        _populate_tree_attachments(
+            child, attach_client, http_client, output_dir, pages_client, page_format
+        )

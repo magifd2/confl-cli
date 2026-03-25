@@ -68,7 +68,24 @@ confl-cli pages tree 123456789 --format json | jq '.'
 
 # ページツリー（深さ2まで、添付ファイル付き）
 confl-cli pages tree 123456789 --depth 2 --attachments --output-dir ./downloads
+
+# ページツリーの各記事を Markdown で保存（--output-dir 必須）
+confl-cli pages tree 123456789 --page-format text --output-dir ./downloads
+
+# ページツリーの各記事を JSON で保存 + 添付ファイルもダウンロード
+confl-cli pages tree 123456789 --page-format json --attachments --output-dir ./downloads
 ```
+
+### `pages tree` の `--page-format`
+
+| フラグ | 保存ファイル |
+|--------|------------|
+| `--page-format text` | `<page-id>/page.md`（markdownify によるテキスト変換） |
+| `--page-format html` | `<page-id>/page.html` |
+| `--page-format json` | `<page-id>/page.json` |
+| `--page-format storage` | `<page-id>/page.xml`（Confluence Storage Format） |
+
+`--output-dir` が必要。`--attachments` と組み合わせて記事本文と添付ファイルを同時にダウンロード可能。
 
 ### `pages get` の出力フォーマット
 
