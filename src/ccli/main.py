@@ -1,4 +1,6 @@
 
+from importlib.metadata import version as _pkg_version
+
 import typer
 
 from .commands.config import config_app
@@ -17,7 +19,7 @@ def main(
     version: bool | None = typer.Option(None, "--version", is_eager=True, help="Show version."),
 ) -> None:
     if version:
-        typer.echo("ccli 0.1.0")
+        typer.echo(f"confl-cli {_pkg_version('confl-cli')}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())

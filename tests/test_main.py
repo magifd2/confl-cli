@@ -14,4 +14,4 @@ def test_help():
 def test_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert "ccli" in result.output
+    assert "confl-cli" in result.output
