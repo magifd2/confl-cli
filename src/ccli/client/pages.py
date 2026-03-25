@@ -106,8 +106,18 @@ class _V1PageMeta(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class _V1ChildrenResponse(BaseModel):
-    results: list[_V1PageMeta]
+class _V1DescAncestor(BaseModel):
+    id: str
+
+
+class _V1DescPage(_V1PageMeta):
+    """Descendant page — same as _V1PageMeta plus an ancestors chain."""
+
+    ancestors: list[_V1DescAncestor] = []
+
+
+class _V1DescendantsResponse(BaseModel):
+    results: list[_V1DescPage]
     size: int = 0
     limit: int = 25
 
@@ -268,17 +278,52 @@ class PagesClient:
         )
 
     # ---------------------------------------------------------------------- #
-    # Tree operations (v1 API — metadata only, no body content)              #
+    # Tree operations (v1 API — batch descendant fetch, O(N/250) API calls) #
     # ---------------------------------------------------------------------- #
 
     def get_tree(self, page_id: str, depth: int | None = None) -> PageNode:
         """Return a tree of PageNode starting from *page_id*.
 
-        Only id, title, url, and dates are fetched per node; body content is
-        omitted for efficiency.  Use *depth* to limit recursion (None = unlimited).
+        Fetches all descendants in one paginated request to
+        /content/{id}/descendant/page and reconstructs the tree client-side.
+        API calls: 1 (root) + ceil(descendants / 250) — instead of N+1.
         """
         root = self._get_page_meta(page_id)
-        self._fill_children(root, depth=depth, current_depth=0)
+        if depth == 0:
+            return root
+
+        descendants = self._get_all_descendants(page_id)
+        if not descendants:
+            return root
+
+        # Sort shallowest-first so parents are always added before their children.
+        descendants.sort(key=lambda d: len(d.ancestors))
+
+        # Determine how many global ancestors the root page has (its depth in
+        # the Confluence hierarchy) by looking at the first descendant's chain.
+        first_ancestors = descendants[0].ancestors
+        root_global_depth = next(
+            (i for i, a in enumerate(first_ancestors) if a.id == page_id), 0
+        )
+
+        nodes: dict[str, PageNode] = {page_id: root}
+        for desc in descendants:
+            depth_from_root = len(desc.ancestors) - root_global_depth
+            if depth is not None and depth_from_root > depth:
+                continue
+            node = PageNode(
+                id=desc.id,
+                title=desc.title,
+                url=f"{self._base_url}{desc.links.webui}" if desc.links.webui else "",
+                created_at=desc.history.created_date,
+                updated_at=desc.version.when,
+            )
+            nodes[desc.id] = node
+            parent_id = desc.ancestors[-1].id if desc.ancestors else page_id
+            parent = nodes.get(parent_id)
+            if parent is not None:
+                parent.children.append(node)
+
         return root
 
     def _get_page_meta(self, page_id: str) -> PageNode:
@@ -294,45 +339,26 @@ class PagesClient:
             updated_at=meta.version.when,
         )
 
-    def _get_children_meta(self, page_id: str) -> list[PageNode]:
-        """Fetch direct children using v1 API (version.when, history.createdDate, webui URL)."""
-        children: list[PageNode] = []
+    def _get_all_descendants(self, page_id: str) -> list[_V1DescPage]:
+        """Fetch all descendant pages in one paginated request."""
+        descendants: list[_V1DescPage] = []
         start = 0
         limit = 250
 
         while True:
             params: dict[str, Any] = {
-                "expand": "version,history",
+                "expand": "version,history,ancestors",
                 "limit": limit,
                 "start": start,
             }
             data = self._client.get(
-                f"{_CONTENT_PATH}/{page_id}/child/page", params=params
+                f"{_CONTENT_PATH}/{page_id}/descendant/page", params=params
             )
-            page = _V1ChildrenResponse(**data)
+            resp = _V1DescendantsResponse(**data)
+            descendants.extend(resp.results)
 
-            for child in page.results:
-                children.append(
-                    PageNode(
-                        id=child.id,
-                        title=child.title,
-                        url=f"{self._base_url}{child.links.webui}" if child.links.webui else "",
-                        created_at=child.history.created_date,
-                        updated_at=child.version.when,
-                    )
-                )
-
-            if page.size < limit:
+            if resp.size < limit:
                 break
-            start += page.size
+            start += resp.size
 
-        return children
-
-    def _fill_children(
-        self, node: PageNode, depth: int | None, current_depth: int
-    ) -> None:
-        if depth is not None and current_depth >= depth:
-            return
-        node.children = self._get_children_meta(node.id)
-        for child in node.children:
-            self._fill_children(child, depth=depth, current_depth=current_depth + 1)
+        return descendants

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-26
+
+### Changed
+- `pages tree` now fetches all descendants in a single paginated request to
+  `/content/{id}/descendant/page?expand=version,history,ancestors` and
+  reconstructs the tree client-side. API calls reduced from O(N) sequential
+  to 1 (root) + ceil(N/250) (descendants) — effectively 2 calls for most trees.
+
 ## [0.1.4] - 2026-03-25
 
 ### Fixed

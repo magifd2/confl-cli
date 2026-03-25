@@ -59,7 +59,7 @@ _PAGE_META = {
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
 
-def _v1_children(*pages: dict) -> dict:  # type: ignore[type-arg]
+def _descendants(*pages: dict) -> dict:  # type: ignore[type-arg]
     return {"results": list(pages), "size": len(pages), "limit": 250}
 
 
@@ -122,7 +122,7 @@ class TestPagesGetAttachments:
 class TestPagesTreeAttachments:
     def _setup_tree(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_PAGE_META)
-        httpx_mock.add_response(json=_v1_children())  # children
+        httpx_mock.add_response(json=_descendants())  # no descendants
 
     def test_attachments_in_tree_json(self, httpx_mock: HTTPXMock) -> None:
         self._setup_tree(httpx_mock)
@@ -152,7 +152,7 @@ class TestPagesTreeAttachments:
 class TestPagesTreePageFormat:
     def _setup_tree(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_PAGE_META)
-        httpx_mock.add_response(json=_v1_children())  # children
+        httpx_mock.add_response(json=_descendants())  # no descendants
 
     def test_page_format_requires_output_dir(self, httpx_mock: HTTPXMock) -> None:
         result = runner.invoke(app, ["pages", "tree", "100", "--page-format", "text"])

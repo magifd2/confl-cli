@@ -11,7 +11,7 @@ from ccli.exceptions import NotFoundError
 
 BASE_URL = "https://example.atlassian.net"
 
-# All metadata responses use v1 format (version.when, history.createdDate, _links.webui)
+# Root uses v1 content format (expand=version,history)
 _ROOT_META = {
     "id": "100",
     "title": "Root Page",
@@ -19,30 +19,35 @@ _ROOT_META = {
     "history": {"createdDate": "2024-01-01T00:00:00.000Z"},
     "_links": {"webui": "/wiki/spaces/DEV/pages/100"},
 }
-_CHILD_A = {
+
+# Descendants use v1 descendant format (includes ancestors list)
+_DESC_CHILD_A = {
     "id": "101",
     "title": "Child A",
     "version": {"when": "2024-01-15T10:00:00.000Z"},
     "history": {"createdDate": "2024-01-05T00:00:00.000Z"},
+    "ancestors": [{"id": "100"}],
     "_links": {"webui": "/wiki/spaces/DEV/pages/101"},
 }
-_CHILD_B = {
+_DESC_CHILD_B = {
     "id": "102",
     "title": "Child B",
     "version": {"when": "2024-01-20T10:00:00.000Z"},
     "history": {"createdDate": "2024-01-06T00:00:00.000Z"},
+    "ancestors": [{"id": "100"}],
     "_links": {"webui": "/wiki/spaces/DEV/pages/102"},
 }
-_GRANDCHILD = {
+_DESC_GRANDCHILD = {
     "id": "201",
     "title": "Grandchild",
     "version": {"when": "2024-01-25T10:00:00.000Z"},
     "history": {"createdDate": "2024-01-07T00:00:00.000Z"},
+    "ancestors": [{"id": "100"}, {"id": "101"}],
     "_links": {"webui": "/wiki/spaces/DEV/pages/201"},
 }
 
-# v1 children response wrapper
-def _children(*pages: dict) -> dict:  # type: ignore[type-arg]
+
+def _descendants(*pages: dict) -> dict:  # type: ignore[type-arg]
     return {"results": list(pages), "size": len(pages), "limit": 250}
 
 
@@ -54,9 +59,9 @@ def _make_client(httpx_mock: HTTPXMock) -> PagesClient:
 
 
 class TestGetTree:
-    def test_root_only_when_no_children(self, httpx_mock: HTTPXMock) -> None:
-        httpx_mock.add_response(json=_ROOT_META)  # GET /pages/100 (v2)
-        httpx_mock.add_response(json=_children())  # GET /content/100/child/page (v1)
+    def test_root_only_when_no_descendants(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(json=_ROOT_META)
+        httpx_mock.add_response(json=_descendants())
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
         assert tree.id == "100"
@@ -65,9 +70,7 @@ class TestGetTree:
 
     def test_single_level_children(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        httpx_mock.add_response(json=_children(_CHILD_A, _CHILD_B))
-        httpx_mock.add_response(json=_children())  # children of A
-        httpx_mock.add_response(json=_children())  # children of B
+        httpx_mock.add_response(json=_descendants(_DESC_CHILD_A, _DESC_CHILD_B))
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
         assert len(tree.children) == 2
@@ -76,35 +79,33 @@ class TestGetTree:
 
     def test_nested_children(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        httpx_mock.add_response(json=_children(_CHILD_A))
-        httpx_mock.add_response(json=_children(_GRANDCHILD))
-        httpx_mock.add_response(json=_children())  # grandchild has no children
+        httpx_mock.add_response(json=_descendants(_DESC_CHILD_A, _DESC_GRANDCHILD))
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
+        assert len(tree.children) == 1
         assert tree.children[0].children[0].id == "201"
         assert tree.children[0].children[0].title == "Grandchild"
 
     def test_depth_zero_fetches_root_only(self, httpx_mock: HTTPXMock) -> None:
-        # depth=0 → _fill_children returns immediately; only 1 request (root meta)
+        # depth=0 → skip descendant request entirely
         httpx_mock.add_response(json=_ROOT_META)
         client = _make_client(httpx_mock)
         tree = client.get_tree("100", depth=0)
         assert tree.id == "100"
         assert tree.children == []
 
-    def test_depth_one_fetches_direct_children_only(self, httpx_mock: HTTPXMock) -> None:
+    def test_depth_one_includes_only_direct_children(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        httpx_mock.add_response(json=_children(_CHILD_A))
-        # Children of child A should NOT be fetched (depth=1 stops here)
+        httpx_mock.add_response(json=_descendants(_DESC_CHILD_A, _DESC_GRANDCHILD))
         client = _make_client(httpx_mock)
         tree = client.get_tree("100", depth=1)
         assert len(tree.children) == 1
-        assert tree.children[0].children == []
+        assert tree.children[0].id == "101"
+        assert tree.children[0].children == []  # grandchild filtered out
 
     def test_url_populated(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        httpx_mock.add_response(json=_children(_CHILD_A))
-        httpx_mock.add_response(json=_children())  # children of A
+        httpx_mock.add_response(json=_descendants(_DESC_CHILD_A))
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
         assert tree.url.startswith(BASE_URL)
@@ -118,8 +119,7 @@ class TestGetTree:
 
     def test_dates_populated(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        httpx_mock.add_response(json=_children(_CHILD_A))
-        httpx_mock.add_response(json=_children())
+        httpx_mock.add_response(json=_descendants(_DESC_CHILD_A))
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
         assert tree.updated_at == "2024-01-10T00:00:00.000Z"
@@ -127,17 +127,40 @@ class TestGetTree:
         assert tree.children[0].updated_at == "2024-01-15T10:00:00.000Z"
         assert tree.children[0].created_at == "2024-01-05T00:00:00.000Z"
 
-    def test_pagination_in_children(self, httpx_mock: HTTPXMock) -> None:
+    def test_pagination_in_descendants(self, httpx_mock: HTTPXMock) -> None:
         httpx_mock.add_response(json=_ROOT_META)
-        # First page: size == limit (250), triggers next page fetch
+        # First page: size == limit → fetch more
         httpx_mock.add_response(
-            json={"results": [_CHILD_A], "size": 250, "limit": 250}
+            json={"results": [_DESC_CHILD_A], "size": 250, "limit": 250}
         )
-        # Second page: size < limit, stops pagination
-        httpx_mock.add_response(json=_children(_CHILD_B))
-        # Children of A and B
-        httpx_mock.add_response(json=_children())
-        httpx_mock.add_response(json=_children())
+        # Second page: size < limit → stop
+        httpx_mock.add_response(json=_descendants(_DESC_CHILD_B))
         client = _make_client(httpx_mock)
         tree = client.get_tree("100")
         assert len(tree.children) == 2
+
+    def test_non_root_starting_node(self, httpx_mock: HTTPXMock) -> None:
+        """Root with global ancestors — depth calc must account for root's position."""
+        root_with_parent = {
+            "id": "101",
+            "title": "Child A",
+            "version": {"when": "2024-01-15T10:00:00.000Z"},
+            "history": {"createdDate": "2024-01-05T00:00:00.000Z"},
+            "_links": {"webui": "/wiki/spaces/DEV/pages/101"},
+        }
+        # Grandchild appears as depth-1 descendant of "101"
+        grandchild_desc = {
+            "id": "201",
+            "title": "Grandchild",
+            "version": {"when": "2024-01-25T10:00:00.000Z"},
+            "history": {"createdDate": "2024-01-07T00:00:00.000Z"},
+            # ancestors includes the global parent "100" AND our root "101"
+            "ancestors": [{"id": "100"}, {"id": "101"}],
+            "_links": {"webui": "/wiki/spaces/DEV/pages/201"},
+        }
+        httpx_mock.add_response(json=root_with_parent)
+        httpx_mock.add_response(json=_descendants(grandchild_desc))
+        client = _make_client(httpx_mock)
+        tree = client.get_tree("101")
+        assert len(tree.children) == 1
+        assert tree.children[0].id == "201"
