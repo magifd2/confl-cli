@@ -11,6 +11,9 @@ from ..client.base import ConfluenceClient
 from ..client.pages import Page, PageNode, PagesClient
 from ..config import Config, load_config
 from ..converters.html_to_text import html_to_markdown
+from ..converters.link_rewriter import build_attachment_map, build_page_map
+from ..converters.link_rewriter import rewrite_html as _rewrite_html
+from ..converters.link_rewriter import rewrite_markdown as _rewrite_markdown
 from ..downloader import download_file, safe_attachment_dest
 from ..exceptions import CCLIError, ConfigError
 from ..formatters.base import use_color
@@ -77,6 +80,19 @@ def pages_get(
     output_dir: Path | None = typer.Option(
         None, "--output-dir", help="Download attachments to this directory."
     ),
+    base_path: Path | None = typer.Option(
+        None,
+        "--base-path",
+        help=(
+            "Root directory used for link rewriting. "
+            "Confluence page links are rewritten to <base-path>/<id>/page.<ext>; "
+            "attachment links to their downloaded location. "
+            "Has no effect without --format text or html."
+        ),
+    ),
+    no_rewrite_links: bool = typer.Option(
+        False, "--no-rewrite-links", help="Disable automatic link rewriting."
+    ),
 ) -> None:
     """Get a single page by ID."""
     config, http_client, cc = _setup()
@@ -106,10 +122,33 @@ def pages_get(
 
     if format == OutputFormat.json:
         print_json(page.model_dump())
-    elif format == OutputFormat.html:
-        print_html(page.body_html)
     elif format == OutputFormat.storage:
         print(page.body_storage)
+    elif not no_rewrite_links and base_path is not None and format in (
+        OutputFormat.text, OutputFormat.html
+    ):
+        page_filename = _PAGE_FORMAT_EXT[format]
+        current_file = base_path / page_id / page_filename
+        att_map = build_attachment_map(page.attachments)
+        if format == OutputFormat.html:
+            print_html(
+                _rewrite_html(
+                    page.body_html, current_file, {}, att_map,
+                    base_path=base_path, page_filename=page_filename,
+                    base_url=config.confluence.url,
+                )
+            )
+        else:
+            md = html_to_markdown(page.body_html)
+            print(
+                _rewrite_markdown(
+                    md, current_file, {}, att_map,
+                    base_path=base_path, page_filename=page_filename,
+                    base_url=config.confluence.url,
+                )
+            )
+    elif format == OutputFormat.html:
+        print_html(page.body_html)
     else:
         print_page(page, color=use_color())
 
@@ -122,13 +161,34 @@ _PAGE_FORMAT_EXT: dict[OutputFormat, str] = {
 }
 
 
-def _save_page_content(page: Page, dest_dir: Path, page_format: OutputFormat) -> None:
+def _save_page_content(
+    page: Page,
+    dest_dir: Path,
+    page_format: OutputFormat,
+    page_map: dict[str, Path] | None = None,
+    attachment_map: dict[str, Path] | None = None,
+    base_url: str = "",
+) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / _PAGE_FORMAT_EXT[page_format]
+    pm = page_map or {}
+    am = attachment_map or {}
     if page_format == OutputFormat.text:
-        dest.write_text(html_to_markdown(page.body_html), encoding="utf-8")
+        content = html_to_markdown(page.body_html)
+        if pm or am:
+            content = _rewrite_markdown(
+                content, dest, pm, am,
+                page_filename=_PAGE_FORMAT_EXT[page_format], base_url=base_url,
+            )
+        dest.write_text(content, encoding="utf-8")
     elif page_format == OutputFormat.html:
-        dest.write_text(page.body_html, encoding="utf-8")
+        content = page.body_html
+        if pm or am:
+            content = _rewrite_html(
+                content, dest, pm, am,
+                page_filename=_PAGE_FORMAT_EXT[page_format], base_url=base_url,
+            )
+        dest.write_text(content, encoding="utf-8")
     elif page_format == OutputFormat.json:
         dest.write_text(
             _json.dumps(page.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8"
@@ -151,6 +211,9 @@ def pages_tree(
     page_format: OutputFormat | None = typer.Option(
         None, "--page-format", help="Save each page body in this format to --output-dir."
     ),
+    no_rewrite_links: bool = typer.Option(
+        False, "--no-rewrite-links", help="Disable automatic link rewriting."
+    ),
 ) -> None:
     """Get a page and all its descendants as a tree."""
     if page_format is not None and output_dir is None:
@@ -165,11 +228,22 @@ def pages_tree(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=exc.exit_code) from None
 
+    # Build page_map upfront so every node can resolve cross-page links.
+    page_map: dict[str, Path] = {}
+    if (
+        not no_rewrite_links
+        and output_dir is not None
+        and page_format in (OutputFormat.text, OutputFormat.html)
+    ):
+        page_map = build_page_map(tree, output_dir, _PAGE_FORMAT_EXT[page_format])
+
     if with_attachments or output_dir:
         _populate_tree_attachments(
             tree, AttachmentsClient(cc), http_client, output_dir,
             pages_client=pc if page_format is not None else None,
             page_format=page_format,
+            page_map=page_map,
+            base_url=config.confluence.url,
         )
 
     if format == TreeOutputFormat.json:
@@ -185,6 +259,8 @@ def _populate_tree_attachments(
     output_dir: Path | None,
     pages_client: PagesClient | None = None,
     page_format: OutputFormat | None = None,
+    page_map: dict[str, Path] | None = None,
+    base_url: str = "",
 ) -> None:
     """Recursively fetch (and optionally download) attachments and page content for every node."""
     try:
@@ -205,7 +281,11 @@ def _populate_tree_attachments(
         if pages_client is not None and page_format is not None:
             try:
                 page = pages_client.get(node.id)
-                _save_page_content(page, output_dir / node.id, page_format)
+                att_map = build_attachment_map(attachments) if page_map is not None else {}
+                _save_page_content(
+                    page, output_dir / node.id, page_format,
+                    page_map=page_map, attachment_map=att_map, base_url=base_url,
+                )
             except CCLIError as exc:
                 typer.echo(f"Warning: page content for {node.id} unavailable: {exc}", err=True)
             except Exception as exc:  # noqa: BLE001
@@ -215,5 +295,6 @@ def _populate_tree_attachments(
 
     for child in node.children:
         _populate_tree_attachments(
-            child, attach_client, http_client, output_dir, pages_client, page_format
+            child, attach_client, http_client, output_dir,
+            pages_client, page_format, page_map, base_url,
         )

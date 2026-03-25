@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `pages get --base-path <dir>`: rewrite Confluence page links to `<base-path>/<id>/page.<ext>` and attachment links to their downloaded location in text/HTML output. No effect for JSON or storage format.
+- `pages tree --page-format` now automatically rewrites cross-page links and attachment links to relative local paths when `--output-dir` is set.
+- `--no-rewrite-links` flag on both `pages get` and `pages tree` to opt out of link rewriting and preserve original Confluence URLs.
+
 ## [0.1.5] - 2026-03-26
 
 ### Changed
