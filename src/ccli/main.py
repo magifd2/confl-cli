@@ -2,7 +2,10 @@ from typing import Optional
 
 import typer
 
+from .commands.config import config_app
+
 app = typer.Typer(help="Atlassian Confluence CLI")
+app.add_typer(config_app, name="config")
 
 
 @app.callback(invoke_without_command=True)
