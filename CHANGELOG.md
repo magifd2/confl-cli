@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-03-26
+
+### Added
+- `spaces export <space-key>`: export all pages in a space as a tree, starting from the space home page. Resolves the home page via the v1 `/space/{key}?expand=homepage` endpoint, then delegates to the same tree logic as `pages tree`. Supports `--depth`, `--format`, `--attachments`, `--output-dir`, `--page-format`, and `--no-rewrite-links`.
+
 ## [0.1.7] - 2026-03-26
 
 ### Fixed

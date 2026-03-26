@@ -6,11 +6,21 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, Field
 
-from ..auth import API_V2
+from ..auth import API_V1, API_V2
+from ..exceptions import NotFoundError
 from .base import ConfluenceClient
 
 _SPACES_PATH = f"{API_V2}/spaces"
+_SPACE_DETAIL_PATH = f"{API_V1}/space"
 _MAX_FETCH = 250  # Confluence v2 upper limit per request
+
+
+class _V1HomepageRef(BaseModel):
+    id: str
+
+
+class _V1SpaceDetail(BaseModel):
+    homepage: _V1HomepageRef | None = None
 
 
 class Space(BaseModel):
@@ -60,6 +70,20 @@ class SpacesClient:
                 break
 
         return spaces[:limit]
+
+    def get_homepage_id(self, space_key: str) -> str:
+        """Return the homepage page ID for *space_key*.
+
+        Uses the v1 ``/space/{key}?expand=homepage`` endpoint.
+        Raises :exc:`NotFoundError` if the space does not exist or has no homepage.
+        """
+        data = self._client.get(
+            f"{_SPACE_DETAIL_PATH}/{space_key}", params={"expand": "homepage"}
+        )
+        detail = _V1SpaceDetail(**data)
+        if detail.homepage is None:
+            raise NotFoundError(f"Space '{space_key}' has no homepage.")
+        return detail.homepage.id
 
     def search(self, query: str, limit: int = 25) -> builtins.list[Space]:
         """Search spaces by name or key (case-insensitive substring match).

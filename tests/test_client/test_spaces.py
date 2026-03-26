@@ -1,12 +1,15 @@
+import pytest
 from pytest_httpx import HTTPXMock
 
 from ccli.auth import build_client
 from ccli.client.base import ConfluenceClient
 from ccli.client.spaces import SpacesClient, _extract_cursor
 from ccli.config import Config, ConfluenceSettings
+from ccli.exceptions import NotFoundError
 
 BASE_URL = "https://example.atlassian.net"
 SPACES_URL = f"{BASE_URL}/wiki/api/v2/spaces"
+SPACE_DETAIL_URL = f"{BASE_URL}/wiki/rest/api/space"
 
 _SPACE_A = {"id": "1", "key": "DEV", "name": "Development", "type": "global", "status": "current"}
 _SPACE_B = {"id": "2", "key": "ARCH", "name": "Architecture", "type": "global", "status": "current"}
@@ -101,6 +104,34 @@ class TestSpacesSearch:
         )
         client = _make_spaces_client(httpx_mock)
         assert client.search("zzznomatch") == []
+
+
+class TestGetHomepageId:
+    def test_returns_homepage_id(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{SPACE_DETAIL_URL}/DEV?expand=homepage",
+            json={"homepage": {"id": "555"}},
+        )
+        client = _make_spaces_client(httpx_mock)
+        assert client.get_homepage_id("DEV") == "555"
+
+    def test_raises_not_found_when_no_homepage(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{SPACE_DETAIL_URL}/DEV?expand=homepage",
+            json={},
+        )
+        client = _make_spaces_client(httpx_mock)
+        with pytest.raises(NotFoundError, match="no homepage"):
+            client.get_homepage_id("DEV")
+
+    def test_raises_not_found_on_404(self, httpx_mock: HTTPXMock) -> None:
+        httpx_mock.add_response(
+            url=f"{SPACE_DETAIL_URL}/NOKEY?expand=homepage",
+            status_code=404,
+        )
+        client = _make_spaces_client(httpx_mock)
+        with pytest.raises(NotFoundError):
+            client.get_homepage_id("NOKEY")
 
 
 class TestExtractCursor:

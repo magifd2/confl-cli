@@ -75,6 +75,21 @@ DEV       Development              global    current
 confl-cli spaces search <query> [--limit N]
 ```
 
+#### `confl-cli spaces export <space-key>`
+スペース内の全ページをツリー形式でエクスポートする。v1 API でホームページ ID を解決し、`pages tree` と同じロジックで処理する。
+
+```
+confl-cli spaces export <space-key>
+  [--depth N]
+  [--format {text,json}]
+  [--attachments]
+  [--output-dir DIR]
+  [--page-format {text,html,json,storage}]
+  [--no-rewrite-links]
+```
+
+`--page-format` は `--output-dir` と併用が必須。
+
 ### 4.2 pages コマンド
 
 #### `confl-cli pages search <query>`

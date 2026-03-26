@@ -8,7 +8,7 @@ Designed around the UNIX philosophy — stdout is data, stderr is logs — so it
 
 ## Features
 
-- List and search spaces
+- List, search, and export spaces (whole-space page tree)
 - Search pages (full-text via CQL)
 - Read a single page (text / HTML / JSON / Confluence Storage Format)
 - Recursively read a page tree
@@ -48,6 +48,12 @@ confl-cli spaces list
 
 # Search spaces
 confl-cli spaces search "Engineering"
+
+# Export all pages in a space (tree from home page)
+confl-cli spaces export DEV
+
+# Export a space and save all page bodies as Markdown
+confl-cli spaces export DEV --page-format text --output-dir ./export
 
 # Search pages (full-text)
 confl-cli pages search "Getting Started" --space DEV

@@ -197,6 +197,50 @@ def _save_page_content(
         dest.write_text(page.body_storage, encoding="utf-8")
 
 
+def _execute_tree(
+    page_id: str,
+    config: Config,
+    http_client: httpx.Client,
+    cc: ConfluenceClient,
+    *,
+    depth: int | None,
+    format: TreeOutputFormat,
+    with_attachments: bool,
+    output_dir: Path | None,
+    page_format: OutputFormat | None,
+    no_rewrite_links: bool,
+) -> None:
+    """Fetch a page tree and produce output.  Shared by ``pages tree`` and ``spaces export``."""
+    pc = PagesClient(cc, config.confluence.url)
+    try:
+        tree = pc.get_tree(page_id, depth=depth)
+    except CCLIError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=exc.exit_code) from None
+
+    page_map: dict[str, Path] = {}
+    if (
+        not no_rewrite_links
+        and output_dir is not None
+        and page_format in (OutputFormat.text, OutputFormat.html)
+    ):
+        page_map = build_page_map(tree, output_dir, _PAGE_FORMAT_EXT[page_format])
+
+    if with_attachments or output_dir:
+        _populate_tree_attachments(
+            tree, AttachmentsClient(cc), http_client, output_dir,
+            pages_client=pc if page_format is not None else None,
+            page_format=page_format,
+            page_map=page_map,
+            base_url=config.confluence.url,
+        )
+
+    if format == TreeOutputFormat.json:
+        print_json(tree.model_dump())
+    else:
+        print_page_tree(tree, color=use_color())
+
+
 @pages_app.command("tree")
 def pages_tree(
     page_id: str = typer.Argument(help="Root page ID."),
@@ -221,35 +265,11 @@ def pages_tree(
         raise typer.Exit(code=6)
 
     config, http_client, cc = _setup()
-    pc = PagesClient(cc, config.confluence.url)
-    try:
-        tree = pc.get_tree(page_id, depth=depth)
-    except CCLIError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=exc.exit_code) from None
-
-    # Build page_map upfront so every node can resolve cross-page links.
-    page_map: dict[str, Path] = {}
-    if (
-        not no_rewrite_links
-        and output_dir is not None
-        and page_format in (OutputFormat.text, OutputFormat.html)
-    ):
-        page_map = build_page_map(tree, output_dir, _PAGE_FORMAT_EXT[page_format])
-
-    if with_attachments or output_dir:
-        _populate_tree_attachments(
-            tree, AttachmentsClient(cc), http_client, output_dir,
-            pages_client=pc if page_format is not None else None,
-            page_format=page_format,
-            page_map=page_map,
-            base_url=config.confluence.url,
-        )
-
-    if format == TreeOutputFormat.json:
-        print_json(tree.model_dump())
-    else:
-        print_page_tree(tree, color=use_color())
+    _execute_tree(
+        page_id, config, http_client, cc,
+        depth=depth, format=format, with_attachments=with_attachments,
+        output_dir=output_dir, page_format=page_format, no_rewrite_links=no_rewrite_links,
+    )
 
 
 def _populate_tree_attachments(
